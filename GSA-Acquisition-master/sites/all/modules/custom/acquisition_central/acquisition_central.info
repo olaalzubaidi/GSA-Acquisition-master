@@ -1,0 +1,7 @@
+name = "Acquisition.gov Generic Module"
+description = "Acquisition.gov Module which will be used for holding Generic Code"
+package = "ACQUISITION"
+core = 7.x
+
+
+files[] = acquisition_central.module

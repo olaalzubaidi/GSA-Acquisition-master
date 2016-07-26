@@ -1,0 +1,5 @@
+name = Acquisition Migrate
+description = Migrate or upload Acquisition FAR and GSAM documents.
+package = Acquisition
+core = 7.x
+version = 7.x-1.0

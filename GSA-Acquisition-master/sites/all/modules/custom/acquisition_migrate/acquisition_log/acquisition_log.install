@@ -1,0 +1,76 @@
+<?php
+
+/**
+ * @file
+ * Install, update and uninstall functions for the acquisition_log module.
+ */
+
+/**
+ * Implements hook_schema().
+ */
+function acquisition_log_schema() {
+  $schema['acquisition_log'] = array(
+    'description' => 'Table that contains logs of all acquisition_log module events.',
+    'fields' => array(
+      'lid' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+        'description' => 'Primary Key: Unique acquisition_log event ID.',
+      ),
+      'uid' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'The {users}.uid of the user who triggered the event.',
+      ),
+      'type' => array(
+        'type' => 'varchar',
+        'length' => 64,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => 'Type of document uploaded, for example "FAR" or "GSAM"',
+      ),
+      'content_type' => array(
+        'type' => 'varchar',
+        'length' => 64,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => 'Type of content type',
+      ),
+      'message' => array(
+        'type' => 'text',
+        'not null' => TRUE,
+        'size' => 'big',
+        'description' => 'Text of log message to be passed into the t() function, like "updated or uploaded".',
+      ),
+      'request_uri'  => array(
+        'type' => 'text',
+        'not null' => TRUE,
+        'description' => 'URL of the origin of the event.',
+      ),
+      'ip' => array(
+        'type' => 'varchar',
+        'length' => 128,
+        'not null' => TRUE,
+        'default' => '',
+        'description' => 'Hostname of the user who triggered the event.',
+      ),
+      'timestamp' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+        'default' => 0,
+        'description' => 'Unix timestamp of when event occurred.',
+      ),
+    ),
+    'primary key' => array('lid'),
+    'indexes' => array(),
+  );
+
+  return $schema;
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function acquisition_log_uninstall() {
+}

@@ -1,0 +1,5 @@
+name = Acquisition Log
+description = Log all messages of FAR/GSAM uploading activities. This module resides in "acquisition_migrate" module.
+package = Acquisition
+core = 7.x
+version = 7.x-1.0

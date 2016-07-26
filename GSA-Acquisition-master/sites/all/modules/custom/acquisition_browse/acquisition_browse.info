@@ -1,0 +1,7 @@
+name = "Acquisition.gov Browse FAR and GSAM"
+description = "Browse FAR and GSAM"
+package = "ACQUISITION"
+core = 7.x
+
+
+files[] = acquisition_browse.module

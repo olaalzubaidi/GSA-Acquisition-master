@@ -1,0 +1,575 @@
+<?php
+
+module_load_include('inc', 'acquisition_migrate', 'far_acquisition_migrate');
+module_load_include('inc', 'acquisition_migrate', 'gsam_acquisition_migrate');
+module_load_include('inc', 'acquisition_migrate', 'mail_acquisition_migrate');
+module_load_include('inc', 'acquisition_migrate', 'upload_acquisition_migrate');
+module_load_include('inc', 'acquisition_migrate', 'preview_acquisition_migrate');
+module_load_include('inc', 'acquisition_migrate', 'archive_acquisition_migrate');
+module_load_include('inc', 'acquisition_migrate', 'download_acquisition_migrate');
+
+/**
+ * Implements hook_menu()
+ */
+//function acquisition_migrate_menu() {
+//  $items = array();
+//  $items['migrate_far_html'] = array(
+//    'title' => "Create FAR Content from html files",
+//    'page callback' => 'acquisition_migrate_process_far',
+//    'access callback' => TRUE,
+//    'type' => MENU_NORMAL_ITEM
+//  );
+//  $items['migrate_gsam_html'] = array(
+//    'title' => "Create GSAM Content from html files",
+//    'page callback' => 'acquisition_migrate_process_gsam',
+//    'access callback' => TRUE,
+//    'type' => MENU_NORMAL_ITEM
+//  );
+//  return $items;
+//}
+//
+//function acquisition_migrate_process_far(){
+//  $dir = "sites/default/files/current/far/html";
+//  $output = "Processing FAR Content from ".$dir." ......";
+//  acquisition_migrate_far_content("far",$dir);
+//  return array('markup' => array('#markup' => $output));
+//}
+//
+//function acquisition_migrate_process_gsam(){
+//  $dir = "sites/default/files/current/gsam/html";
+//  $output = "Processing GSAM Content from ".$dir." ......";
+//  acquisition_migrate_gsam_content("gsam",$dir);
+//  return array('markup' => array('#markup' => $output));
+//}
+
+/**
+ * Implements hook_node_presave($node)
+ */
+function acquisition_migrate_node_presave($node) {
+    if($node->type === 'current_uploads') {
+        // Get content type 'far' or 'gsam'
+        $upload_type = '';
+        $upload_type = strtolower($node->field_upload_type['und'][0]['value']);
+
+        $zip_file_unarchived = false;
+        // get uploaded file's $file obj
+        $file = load_file_obj($node);
+        // we need file object to work on or else we skip this block of code
+        if(!empty($file)) {
+            $basename = basename($file->uri); // FAC 2005-78-1 HTML Files (Current) _0.zip
+            $dirname = dirname($file->uri); // public://current/far/uploads
+            if(!empty($file->uri)) {
+                // Only ZIP format is supported at this time
+                if($file->filemime === 'application/zip') {
+                    unarchive_zip_file($file);
+                    $zip_file_unarchived = true;
+                } else {
+                    $ext = pathinfo($file->uri, PATHINFO_EXTENSION);
+                    $message = strtoupper($ext) . t(' unsupported archive format supplied. Please, use ZIP format.');
+                    drupal_set_message($message, 'warning');
+                    watcher($node->type, $upload_type, $message);
+                }
+            }
+
+            switch ($upload_type) {
+                case 'far':
+                    $content_type = $upload_type;
+                    $path = getcwd() . '/sites/default/files/current/' . $content_type . '/uploads';
+                    $des = getcwd() . '/sites/default/files/current/' . $content_type . '/html';
+                    break;
+                case 'gsam':
+                    $content_type = $upload_type;
+                    $path = getcwd() . '/sites/default/files/current/' . $content_type . '/uploads';
+                    $des = getcwd() . '/sites/default/files/current/' . $content_type . '/html';
+                    break;
+                default:
+                    $content_type = 'far';
+                    $path = getcwd() . '/sites/default/files/current/' . $content_type . '/uploads';
+                    $des = getcwd() . '/sites/default/files/current/' . $content_type . '/html';
+            }
+            if(!empty($content_type) && $zip_file_unarchived === true) {
+                // start archiving when a new file is uploaded
+                // we already have zip files for the current docs
+                // just move /current/[far/gsam]/zip docs to /archives/[far/gsam]/ dir
+                archive_current_far_gsam_docs($node);
+                // move extracted docs to /current/[far/gsam]/ dir
+                _move_uploaded_files($path, $file, $content_type, $node->op);
+                // zip /html, /pdf, /loose_leaf dirs to /current/[far/gsam]/zip
+                zip_current_far_gsam_dir($node);
+                if($content_type === 'far' && !empty($file->uri)) {
+                    acquisition_migrate_far_content($content_type, $des, $file->uri);
+                    watcher('current_uploads', 'far', 'FAR nodes either created or updated');
+                } elseif($content_type === 'gsam' && !empty($file->uri)) {
+                    acquisition_migrate_gsam_content($content_type, $des, $file->uri);
+                    watcher('current_uploads', 'gsam', 'GSAM nodes either created or updated');
+                }
+            }
+        }
+    }
+}
+
+/**
+ * move uploaded files from /uploads dir to /html, /pdf, /loose_leaf dirs
+ */
+function _move_uploaded_files($path, $file, $content_type, $node_op) {
+    if(!empty($file)) {
+        $filename = basename($file->uri, '.zip'); // FAC 2005-78-1 HTML Files (Current) _0
+        $basename = basename($file->uri); // FAC 2005-78-1 HTML Files (Current) _0.zip
+        $dirname = dirname($file->uri); // public://current/far/uploads
+        $src = getcwd() . '/sites/default/files/current/' . $content_type . '/uploads/' . $filename;
+        $dst = getcwd() . '/sites/default/files/current/' . $content_type;
+
+        // create dir if not there
+        $return_val_html = $return_val_pdf = $return_val_loose_leaf = FALSE;
+        if(!file_exists($dst . '/html')) {
+            $return_val_html = mkdir($dst . '/html', 0755, true);
+            if($return_val_html) {
+                watcher('current_uploads', $content_type, $content_type . '/html directory has been created');
+            } else {
+                watcher('current_uploads', $content_type, 'Failed to create /html folder. Possible directory permission issue.');
+            }
+        }
+        if(!file_exists($dst . '/pdf')) {
+            $return_val_pdf = mkdir($dst . '/pdf', 0755, true);
+            if($return_val_pdf) {
+                watcher('current_uploads', $content_type, $content_type . '/pdf directory has been created');
+            } else {
+                watcher('current_uploads', $content_type, 'Failed to create /pdf folder. Possible directory permission issue.');
+            }
+        }
+        if(!file_exists($dst . '/loose_leaf')) {
+            $return_val_loose_leaf = mkdir($dst . '/loose_leaf', 0755, true);
+            if($return_val_loose_leaf) {
+                watcher('current_uploads', $content_type, $content_type . '/loose_leaf directory has been created');
+            } else {
+                watcher('current_uploads', $content_type, 'Failed to create /loose_leaf folder. Possible directory permission issue.');
+            }
+        }
+
+        if(!empty($filename) && $node_op !== 'Preview') {
+            $new_folders = array();
+            $new_folders = get_existing_folder_name($src);
+            $inside_new_folder = array();
+            foreach($new_folders as $new_folder) {
+                if(file_exists($src . '/html') && $new_folder == 'html') {
+                    exec('rm -rf ' . $dst . '/html');
+                    exec('cp -rf "' . $src . '/' . $new_folder . '/"' . ' ' . $dst . '/html', $output, $return_var);
+                    if($return_var == 0) {
+                        watcher('current_uploads', $content_type, strtoupper($content_type) . ' docs moved to /html dir');
+                    } else {
+                        watcher('current_uploads', $content_type, strtoupper($content_type) . ' html docs move failed!');
+                    }
+                } elseif(file_exists($src . '/pdf') && $new_folder == 'pdf') {
+                    exec('rm -rf ' . $dst . '/pdf');
+                    exec('cp -rf "' . $src . '/pdf/"' . ' ' . $dst . '/pdf', $output, $return_var);
+                    if($return_var == 0) {
+                        watcher('current_uploads', $content_type, strtoupper($content_type) . ' docs moved to /pdf dir');
+                    } else {
+                        watcher('current_uploads', $content_type, strtoupper($content_type) . ' pdf docs move failed!');
+                    }
+                } elseif(file_exists($src . '/loose_leaf') && $new_folder == 'loose_leaf') {
+                    exec('rm -rf ' . $dst . '/loose_leaf');
+                    exec('cp -rf "' . $src . '/loose_leaf/"' . ' ' . $dst . '/loose_leaf', $output, $return_var);
+                    if($return_var == 0) {
+                        watcher('current_uploads', $content_type, strtoupper($content_type) . ' docs moved to /loose_leaf dir');
+                    } else {
+                        watcher('current_uploads', $content_type, strtoupper($content_type) . ' loose_leaf docs move failed!');
+                    }
+                } elseif(file_exists($src . '/' . $new_folder) && (strpos($new_folder, $filename)) || $new_folder == $filename) {
+                    $inside_new_folder = get_existing_folder_name($src . '/' . $new_folder);
+                    foreach($inside_new_folder as $n_folder) {
+                        if(file_exists($src . '/' . $new_folder . '/html') && $n_folder == 'html') {
+                            exec('rm -rf ' . $dst . '/html');
+                            exec('cp -rf "' . $src . '/' . $new_folder . '/html"' . ' '. $dst . '/html', $output, $return_var);
+                            if($return_var == 0) {
+                                watcher('current_uploads', $content_type, strtoupper($content_type) . ' docs moved to /html dir');
+                            } else {
+                                watcher('current_uploads', $content_type, strtoupper($content_type) . ' html docs move failed!');
+                            }
+                        } elseif(file_exists($src . '/' . $new_folder . '/pdf') && $n_folder == 'pdf') {
+                            exec('rm -rf ' . $dst . '/pdf');
+                            exec('cp -rf "' . $src . '/' . $new_folder . '/pdf"' . ' ' . $dst . '/pdf', $output, $return_var);
+                            if($return_var == 0) {
+                                watcher('current_uploads', $content_type, strtoupper($content_type) . ' docs moved to /pdf dir');
+                            } else {
+                                watcher('current_uploads', $content_type, strtoupper($content_type) . ' pdf docs move failed!');
+                            }
+                        } elseif(file_exists($src . '/' . $new_folder . '/loose_leaf') && $n_folder == 'loose_leaf') {
+                            exec('rm -rf ' . $dst . '/loose_leaf');
+                            exec('cp -rf "' . $src . '/' . $new_folder . '/loose_leaf"' . ' ' . $dst . '/loose_leaf', $output, $return_var);
+                            if($return_var == 0) {
+                                watcher('current_uploads', $content_type, strtoupper($content_type) . ' docs moved to /loose_leaf dir');
+                            } else {
+                                watcher('current_uploads', $content_type, strtoupper($content_type) . ' "loose_leaf" docs move failed!');
+                            }
+                        }
+                    }
+                }
+            }
+            //remove extracted folder after copying is finished
+            exec('rm -rf "' . $src . '"', $output, $return_var);
+            if($return_var == 0) {
+                watcher('current_uploads', $content_type, '/tmp unzipped folder removed');
+            } else {
+                watcher('current_uploads', $content_type, 'Failed to remove /tmp unzipped folder');
+            }
+        }
+    }
+}
+
+/**
+ * @param
+ *  $node - node object
+ */
+function load_file_obj($node) {
+    if($node->type === 'current_uploads') {
+        if($node->field_far_file['und']) {
+            $fid = $node->field_far_file['und'][0]['fid'];
+        } elseif($node->field_gsam_file['und']) {
+            $fid = $node->field_gsam_file['und'][0]['fid'];
+        } else {
+            $fid = false;
+        }
+        if(!empty($fid)) {
+            $file = file_load($fid);
+        } else {
+            $file = false;
+        }
+        return $file;
+    }
+}
+
+/**
+ * @param
+ *  $src - string containing source file path
+ *  $dst - string containing destination file path
+ */
+function copy_dir_recursive($src, $dst) {
+    $dir = opendir($src);
+    @mkdir($dst);
+    while(false !== ($file = readdir($dir)) ) {
+        if(($file != '.' ) && ($file != '..')) {
+            if(is_dir($src . '/' . $file) ) {
+                copy_dir_recursive($src . '/' . $file, $dst . '/' . $file);
+            } else {
+                copy($src . '/' . $file, $dst . '/' . $file);
+            }
+        }
+    }
+    closedir($dir);
+}
+
+/**
+ * @param
+ *  $file_uri - string containinguploaded file path
+ */
+function parse_html_doc_file($file_uri) {
+    if(!empty($file_uri) && is_file($file_uri)) {
+        $html_file = fopen($file_uri, "r");
+        if($html_file) {
+            $html_content = fread($html_file, filesize($file_uri));
+        } else {
+            $html_content = false;
+            drupal_set_message('Unable to open file!', 'warning');
+        }
+        fclose($html_file);
+        return $html_content;
+    } else {
+        return false;
+    }
+}
+
+/**
+ * @param
+ *  $file_uri - string containing uploaded file path
+ *  $tag - string containing html elements like a, h1, h2
+ */
+function parse_html_page_title($file_uri, $tag) {
+    $DOM = new DOMDocument;
+    if (!empty($file_uri) && is_file($file_uri)) {
+        $DOM->load($file_uri);
+        $value = '';
+        $tag_value = $DOM->getElementsByTagName($tag);
+        for ($i = 0; $i < $tag_value->length; $i++) {
+            $value = $tag_value->item($i)->nodeValue;
+        }
+        return $value;
+    } else {
+        return false;
+    }
+}
+
+/**
+ * Implements hook_node_insert()
+ */
+function acquisition_migrate_node_insert($node) {
+    // Send email notification only when node is
+    //  - Node is new
+    //  - Node finaly gets saved after preview
+    // Node ID absence makes $form_values to be empty
+    //  - If node is in preview mode and not yet saved notification email won't be sent.
+    if($node->type === 'current_uploads') {
+        $form_values = get_email_message($node);
+        if($node->op == 'Save') {
+            acquisition_migrate_mail_send($form_values);
+        }
+    }
+}
+
+/**
+ * Implements hook_node_update()
+ */
+function acquisition_migrate_node_update($node) {
+    // send uploads email notification during updates
+    if($node->type === 'current_uploads') {
+        $form_values = get_email_message($node);
+        if($node->op == 'Save') {
+            acquisition_migrate_mail_send($form_values);
+        }
+    }
+}
+
+/**
+ * @param
+ *  $title - string which passes node title
+ *  $type - string which passes node type
+ */
+function get_node_info($title = NULL, $type = "", $record = 'single', $listed_in_index = NULL, $file_location = NULL, $status = 1) {
+    $query = db_select('node', 'n');
+    $query->join('field_data_body', 'b', 'b.entity_id = n.nid');
+    $query->join('field_data_field_file_location', 'fl', 'fl.entity_id = n.nid');
+    $query->join('field_data_field_listed_in_index', 'li', 'li.entity_id = n.nid');
+    $query->fields('n',array('nid', 'vid', 'title','created', 'changed'));
+    $query->fields('b',array('body_value'));
+    $query->fields('fl',array('field_file_location_value'));
+    $query->fields('li',array('field_listed_in_index_value'));
+    $query->condition('type', $type,'=');
+    ($status != null) ? $query->condition('status', $status,'=') : false;
+    !empty($title) ? $query->condition('title', $title,'=') : false;
+    !empty($file_location) ? $query->condition('field_file_location_value', $file_location,'=') : false;
+    !empty($listed_in_index) ? $query->condition('field_listed_in_index_value', $listed_in_index,'=') : false;
+    $record == 'single' ? $results = $query->execute() : $results = $query->execute()->fetchAll();
+
+    switch ($record) {
+        case 'single':
+            foreach($results as $result) {
+                if($result) {
+                    return $result;
+                }
+            }
+            break;
+        case 'all':
+            $db_result = array();
+            foreach($results as $result) {
+                if($result) {
+                    $db_result[] = array(
+                        'nid' => $result->nid,
+                        'title' => $result->title,
+                        'file_path' => $result->field_file_location_value,
+                        'index' => $result->field_listed_in_index_value,
+                    );
+                }
+            }
+            return $db_result;
+            break;
+    }
+}
+
+
+/**
+ * Implements hook_form_alter()
+ */
+function acquisition_migrate_form_alter(&$form, &$form_state, $form_id) {
+    global $user;
+    // only one selection FAR or GSAM
+    if ($form_id === 'current_uploads_node_form') {
+        $far_gsam_disp = 'no';
+        if(in_array('GSAM Admin',$user->roles)){
+            if(in_array('FAR Admin',$user->roles)){
+                $far_gsam_disp = 'yes';
+            }
+            else{
+                $form['field_far_file']['#access'] = FALSE;
+                $form['field_gsam_file']['#access'] = TRUE;
+                $options[] = 'GSAM';
+                $def_options = array('GSAM');
+                $form['field_fac_number']['und']['0']['value']['#title'] = 'Change Number';
+                $form['field_upload_type']['und']['#default_value'] = $def_options;
+                $form['field_upload_type']['und']['#options'] = array_unique($options);
+            }
+        }
+        elseif(in_array('FAR Admin',$user->roles)){
+            if(in_array('GSAM Admin',$user->roles)){
+                $far_gsam_disp = 'yes';
+            }
+            else{
+                $form['field_far_file']['#access'] = TRUE;
+                $form['field_gsam_file']['#access'] = FALSE;
+                $options[] = 'FAR';
+                $def_options = array('FAR');
+                $form['field_fac_number']['und']['0']['value']['#title'] = 'FAC Number';
+                $form['field_upload_type']['und']['#default_value'] = $def_options;
+                $form['field_upload_type']['und']['#options'] = array_unique($options);
+            }
+        }
+        if(in_array('Site Admin',$user->roles) || ($far_gsam_disp == 'yes')){
+            $form['field_gsam_file']['#states'] = array(
+                'visible' => array(
+                    ':input[name="field_upload_type[und]"]' => array('value' => 'GSAM'),
+                ),
+            );
+            $form['field_far_file']['#states'] = array(
+                'visible' => array(
+                    ':input[name="field_upload_type[und]"]' => array('value' => 'FAR'),
+                ),
+            );
+            $form['field_far_file']['#access'] = TRUE;
+            $form['field_gsam_file']['#access'] = TRUE;
+        }
+        // validation for current_upload effective date
+        $form['#validate'][] = 'acquisition_migrate_form_validate';
+
+//    // block 'FAR Admin' from using 'GSAM upload field' accidentally.
+//    // block 'GSAM Admin' from using 'FAR upload field' accidentally.
+//    $uid = $form['#node']->uid;
+//    $user = user_load($uid);
+//    $user_roles = $user->roles;
+//    foreach($user_roles as $key => $user_role) {
+//      if($key != 2) {
+//        if($user_role === 'FAR Admin') {
+//          $form['field_gsam_file']['#states'] = array(
+//            'disabled' => array(
+//              'select[name="field_upload_type[und]"]' => array('value' => 'GSAM'),
+//            ),
+//            'invisible' => array(
+//              ':input[name="field_upload_type[und]"]' => array('value' => 'FAR'),
+//            ),
+//          );
+//        } elseif($user_role === 'GSAM Admin') {
+//          $form['field_far_file']['#states'] = array(
+//            'disabled' => array(
+//              'select[name="field_upload_type[und]"]' => array('value' => 'FAR'),
+//            ),
+//            'invisible' => array(
+//              ':input[name="field_upload_type[und]"]' => array('value' => 'GSAM'),
+//            ),
+//          );
+//        }
+//      }
+//    }
+    }
+}
+
+/**
+ * Implements hook_form_validate
+ */
+function acquisition_migrate_form_validate($form, &$form_state) {
+    // Get current_uploads upload type 'far' or 'gsam'
+    $u_type = '';
+    $u_type = $form_state['values']['field_upload_type']['und'][0]['value'];
+    //$u_type = $form['#node']->field_upload_type['und'][0]['value'];
+
+    $results = get_last_upload($u_type);
+    if(!empty($results)) {
+        foreach($results as $result) {
+            $last_effective_date = strtotime($result->field_archive_effective_date_value);
+        }
+        $current_effective_date = strtotime($form_state['values']['field_archive_effective_date']['und'][0]['value']);
+        if(!empty($last_effective_date)) {
+            if ($current_effective_date < $last_effective_date || $current_effective_date > time()) {
+                $last_effective_date = date("F j, Y", $last_effective_date);
+                form_set_error('field_archive_effective_date', t('Effective Date must be > THAN [' . $last_effective_date . '] and <= [' . date("F j, Y", time()) . ']'));
+            }
+        } else {
+            if ($current_effective_date > time()) {
+                form_set_error('field_archive_effective_date', t('Effective Date must not be in the future [' . date("F j, Y", $current_effective_date) . ']'));
+            }
+        }
+    }
+}
+
+/**
+ * Implements hook_file_delete($file)
+ */
+function acquisition_migrate_file_delete($file) {
+    // Delete all information associated with the file just uploaded.
+    // File with a [status = 0] means file has never been used before and will be deleted permanently.
+    // File with a [status = 1] means file has been used somewhere and WILL NOT be deleted permanently,
+    //   Instead user will not be able to use the file in current node again,
+    //   But user may use the file again if older revision is reverted.
+    db_delete('file_managed')
+        ->condition('fid', $file->fid)
+        ->execute();
+}
+
+/**
+ * Do recursive array search
+ * @param
+ *  $needle - string to search for
+ *  $haystack - array the search is made on
+ */
+function recursive_array_search($needle, $haystack) {
+    if(!empty($haystack)) {
+        foreach($haystack as $key => $value) {
+            $current_key = $key;
+            if($needle === $value OR (is_array($value) && recursive_array_search($needle, $value) !== false)) {
+                return $current_key;
+            }
+        }
+    }
+    return false;
+}
+
+/*
+ * @param
+ *  $a_tag_href - string
+ *    - href link from FARMTOCP file
+ *  $pdf - array
+ *    - array of all ../pdf file's paths
+ */
+function get_pdf_file_path($a_tag_href, $pdf) {
+    $file_name = strstr($a_tag_href, '.html#', true);
+    $file_name .= '.pdf';
+    $key = recursive_array_search($file_name, $pdf);
+    // 0 (zero) will be considered [false]
+    // - in this case index 0 should be considered as false, instead we use is_numeric
+    //   to check $key >= 0
+    return is_numeric($key) ? $pdf[$key]['path'] : '';
+}
+
+/*
+ * @param
+ *  $c_type - string
+ *    - content type
+ */
+function get_pdf_files($c_type) {
+    $pdf_dir = 'sites/default/files/current/' . $c_type . '/pdf';
+    $pdf_mask = '/.*\.pdf$/';
+    $pdf_files = array();
+    $pdf_files = file_scan_directory($pdf_dir, $pdf_mask, $options = array('recurse' => TRUE), $depth = 5);
+    $pdf = array();
+    if(!empty($pdf_files)) {
+        foreach($pdf_files as $pdf_file) {
+            $pdf[] = array(
+                'filename' => $pdf_file->filename,
+                'path' => $pdf_file->uri,
+            );
+        }
+    }
+    return !empty($pdf) ? $pdf : false;
+}
+
+/*
+ * @param
+ *  $c_type - string
+ *    - content type
+ * @return
+ *  return list of all file object
+ */
+function get_html_files($c_type) {
+    $dir = 'sites/default/files/current/' . $c_type . '/html';
+    $mask = '/.*\.html$/';
+    $files = file_scan_directory($dir, $mask, $options = array('recurse' => TRUE), $depth = 5);
+    return $files;
+}
+

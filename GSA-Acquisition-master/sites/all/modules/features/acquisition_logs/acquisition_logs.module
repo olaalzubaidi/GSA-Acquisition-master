@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the Acquisition Logs feature.
+ */
+
+include_once 'acquisition_logs.features.inc';

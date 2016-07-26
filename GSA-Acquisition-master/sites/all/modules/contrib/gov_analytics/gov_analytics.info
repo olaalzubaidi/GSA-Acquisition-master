@@ -1,0 +1,7 @@
+name = Gov Analytics
+description = Implements DAP UA Government-Wide Analytics Tool for Federal Agencies http://www.digitalgov.gov/services/dap/analytics-tool-instructions/
+package = Contrib
+core = 7.x
+files[] = gov_analytics.module
+dependencies[] = libraries (2.x)
+configure = admin/config/system/gov_analytics

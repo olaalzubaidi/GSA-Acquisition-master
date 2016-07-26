@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the Current Uploads feature.
+ */
+
+include_once 'current_uploads.features.inc';

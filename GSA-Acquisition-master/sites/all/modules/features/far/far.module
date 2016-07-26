@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the FAR feature.
+ */
+
+include_once 'far.features.inc';

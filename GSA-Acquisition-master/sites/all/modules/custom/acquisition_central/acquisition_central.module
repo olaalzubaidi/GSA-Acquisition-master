@@ -1,0 +1,632 @@
+<?php
+/*
+ * Hook_menu
+ */
+function acquisition_central_menu() {
+
+    $items = array();
+
+    $items['archive_process_csv'] = array(
+        'title' => "Create Archive Content from the CSV file",
+        'page callback' => 'acquisition_central_archive_csv_parse',
+        'access callback' => TRUE,
+        'type' => MENU_NORMAL_ITEM        );
+    $items['downloadzip/%/%'] = array(
+        'title' => "Download Content as Zip files",
+        'page callback' => 'acquisition_central_download_zip',
+        'page arguments' => array(1, 2),
+        'access callback' => TRUE,
+        'type' => MENU_NORMAL_ITEM        );
+    $items['downloadnode/%/%'] = array(
+        'title' => "Download Content from node",
+        'page callback' => 'acquisition_central_download_node',
+        'page arguments' => array(1, 2),
+        'access callback' => TRUE,
+        'type' => MENU_NORMAL_ITEM        );
+    $items['downloadcurrentzip'] = array(
+        'title' => "Download Current Content as Zip files",
+        'page callback' => 'acquisition_central_download_cur_page_zip',
+        'access callback' => TRUE,
+        'type' => MENU_NORMAL_ITEM        );
+    return $items;
+}
+
+/*
+ * Function to process CSV, parse elements and create content for archive content type
+ */
+function acquisition_central_archive_csv_parse(){
+$output = "";
+$csvFilePath = "sites/default/files/Acquisition_FAR_GSAM_Data_List.csv";
+    $row = 1;
+    $parsed_data = array();
+    if (($handle = fopen($csvFilePath, "r")) !== FALSE) {
+        while (($data = fgetcsv($handle, 0, ",",'"')) !== FALSE) {
+            if($row > '1'){
+                $num = count($data);
+            for ($c=0; $c < $num; $c++) {
+                $arch_type = trim($data[0]);
+                $arch_title_far = $data[1];
+                $arch_title_gsam = explode(".pdf",$data[3]);
+                $arch_effect_date = date("Y-m-d",strtotime($data[4]));
+                //Get year to save as tags
+                $arch_effect_year = date("Y",strtotime($data[4]));
+                //file path
+                $arch_zip_file = trim($data[5]);
+                $arch_pdf_file = trim($data[6]);
+                $parsed_data[$row] = array(
+                    "arch_type"=> $arch_type,
+                    "arch_title_far"=>$arch_title_far,
+                    "arch_title_gsam"=>$arch_title_gsam[0],
+                    "arch_effect_date"=>$arch_effect_date,
+                    "arch_effect_year"=>$arch_effect_year,
+                    "arch_zip_file"=>$arch_zip_file,
+                    "arch_pdf_file"=>$arch_pdf_file,
+                );
+            }
+            }
+            $row++;
+        }
+    }
+    fclose($handle);
+    foreach($parsed_data as $pkey => $parr){
+        if($parr['arch_type'] == 'far'){
+            $atitle = $parr['arch_title_far'];
+
+        }
+        elseif($parr['arch_type'] == 'gsam'){
+            $atitle = $parr['arch_title_gsam'];
+        }
+        $output .= $parr['arch_type']." -- ".$parr['arch_title_far']." -- ".$parr['arch_effect_date']."---".$parr['arch_effect_year']." -- ".$parr['arch_zip_file']." --". $parr['arch_pdf_file']."<br />\n";
+        $row = db_query('SELECT nid FROM {node} WHERE title = :mytitle', array(':mytitle' => $atitle))->fetchField();
+        if(!isset($row['nid'])) {
+            //safe to continue
+                //Set the Basic Node elements for Node Creation
+                $anode = new stdClass();
+                $anode->type = "archives";
+                $anode->language = LANGUAGE_NONE;
+                $anode->uid = 1;
+                node_object_prepare($anode);
+                $anode->status = 1;
+                $anode->promote = 1;
+                $anode->log = "";
+                $anode->revision = 1;
+                //Set the fields for Archive
+                if($parr['arch_type'] == 'far'){
+                    $anode->title = $parr['arch_title_far'];
+                    $anode->field_fac_number['und']['0']['value'] = $parr['arch_title_far'];
+
+                }
+                elseif($parr['arch_type'] == 'gsam'){
+                    $anode->title = $parr['arch_title_gsam'];
+                    $anode->field_fac_number['und']['0']['value'] = $parr['arch_title_gsam'];
+                }
+                $anode->field_archive_type['und']['0']['value'] = $parr['arch_type'];
+                $anode->field_archive_effective_date['und']['0']['value'] = $parr['arch_effect_date'];
+                //Set the taxonomy tags for the content. Year and Type are currnetly used
+                $tags_array = array($parr['arch_effect_year'],$parr['arch_type']);
+                foreach($tags_array as $tkey=>$tval){
+                    if ($term = taxonomy_get_term_by_name($tval)) {
+                        //Assign an existing taxonomy
+                        $terms_array = array_keys($term);
+                        $anode->field_tags['und'][$tkey]['tid'] = $terms_array['0'];
+                    } else {
+                        //Create a new taxonomy if doesnt exist
+                        $term = new STDClass();
+                        $term->name = $tval;
+                        $term->vid = 1;
+                        if (!empty($term->name)) {
+                            $term_save = taxonomy_term_save($term);
+                            $term = taxonomy_get_term_by_name($tval);
+                            $tid = $term->tid;
+                            if($tid != NULL)
+                                $anode->field_tags['und'][$tkey]['tid'] = $tid;
+                        }
+                    }
+                }
+
+//$arch_pdf_file = 'sites/default/files/archives/far/zip/FAC 1990-35 HTML Files.zip';
+                //File Object Assign for pdf file
+                if($arch_pdf_file != ''){
+                    $file = new StdClass();
+                    $file->uid = 1;
+                    $file->uri = $parr['arch_pdf_file'];
+                    $file->filename = basename($parr['arch_pdf_file']);
+                    $dest = file_default_scheme() . '://archives/'.$parr['arch_type'].'/pdf/'.$file->filename; // Subdirectory name within files directory. ($dest is optional.)
+                    $file = file_copy($file, $dest);
+                    $file->filemime = file_get_mimetype($file->uri);
+                    $file->status = 1;
+
+                    $file->display = 1;
+                    $file->description = basename($parr['arch_pdf_file']);
+                    $anode->field_pdf_file['und']['0'] = (array)$file;
+                }
+
+                //File Object Assign for zip file
+                if($arch_zip_file != ''){
+                    $file1 = new StdClass();
+                    $file1->uid = 1;
+                    $file1->uri = $parr['arch_zip_file'];
+                    $file1->filename = basename($parr['arch_zip_file']);
+                    $dest1 = file_default_scheme() . '://archives/'.$parr['arch_type'].'/zip/'.$file1->filename; // Subdirectory name within files directory. ($dest is optional.)
+                    $file1 = file_copy($file1, $dest1);
+                    $file1->filemime = file_get_mimetype($file1->uri);
+                    $file1->status = 1;
+
+                    $file1->display = 1;
+                    $file1->description = basename($parr['arch_zip_file']);
+                    $anode->field_zip_file['und']['0'] = (array)$file1;
+                }
+
+                //Actual Node Save
+                //$anode=node_submit($anode);
+                node_save($anode);
+
+    }
+    }
+
+    return array('markup' => array('#markup' => $output));
+
+}
+/*
+ * This function downloads the subparts and parts as a zip file. If a part is selected all subparts are also downloaded along with part file.
+ * Usage: Part download = downloadzip/far/part/11
+ * Subpart Download = downloadzip/far/subpart/11/1
+ * $type= 'far' or 'gsam'
+ * $doc_type = 'part' or 'subpart'
+ *
+ */
+
+function acquisition_central_download_zip($type, $doc_type){
+    $files = array();
+    $output = "";
+    $parameters = drupal_get_query_parameters();
+    $parsedurl = filter_xss(urldecode($parameters['url']));
+    module_load_include('inc', 'acquisition_migrate', 'download_acquisition_migrate');
+
+    if($doc_type == 'part'){
+        $row = db_query("select a.field_part_number_value,c.field_doc_type_value from field_data_field_part_number a , field_data_field_file_location b , field_data_field_doc_type c where a.entity_id=b.entity_id and a.entity_id=c.entity_id and b.field_file_location_value like :file", array(':file' => $parsedurl));
+        foreach ($row as $record) {
+            $field_part_number_value = $record->field_part_number_value;
+            $field_doctype = $record->field_doc_type_value;
+        }
+        $part_number = $field_part_number_value;
+        if($field_doctype != ''){
+        $parts_subparts_files = get_part_subpart($type, 'subpart', 1, $part_number);
+        $parts_file = get_part_subpart_file_path($type, $doc_type, $part_number);
+
+        foreach($parts_subparts_files as $key=>$val){
+            if(strpos($val->field_file_location_value,"#"))
+                $file_location = strstr($val->field_file_location_value, '#', true);
+            else
+                $file_location = $val->field_file_location_value;
+            $files[] = "/".$file_location;
+            $output .= $file_location."<br>";
+        }
+        if(strpos($parts_file,"#")){
+            $file_locationpart = strstr($parts_file, '#', true);
+
+        }
+        else
+            $file_locationpart = $parts_file;
+
+
+        $files[] = "/".$file_locationpart;
+        $output .= $file_locationpart."<br>";
+        $archive_file_name = $type."_".$doc_type."_".$part_number;
+        }
+        else{
+            $parts_file = $parsedurl;
+            if(strpos($parts_file,"#"))
+                $file_location = strstr($parts_file, '#', true);
+            else
+                $file_location = $parts_file;
+            $files[] = "/".$file_location;
+            $archive_file_name = basename($file_location);
+        }
+
+    }
+    elseif($doc_type == 'subpart'){
+        //$parts_file = get_part_subpart_file_path($type, $doc_type, $part_number,$sub_part_number);
+        $parts_file = $parsedurl;
+        if(strpos($parts_file,"#"))
+            $file_location = strstr($parts_file, '#', true);
+        else
+            $file_location = $parts_file;
+        $files[] = "/".$file_location;
+        $archive_file_name = basename($file_location);
+
+    }
+
+    $output .=  $archive_file_name;
+
+    $zip_name = "/tmp/".$archive_file_name.".zip"; // Zip name
+    if(file_exists($zip_name))
+        unlink($zip_name);
+    $zip = new ZipArchive();
+    $zip->open($zip_name,  ZipArchive::CREATE);
+    foreach ($files as $file) {
+        $path = getcwd().$file;
+        if(file_exists($path)){
+           // $output .= "file $path exist";
+            $zip->addFromString(basename($path),  file_get_contents($path));
+            array('markup' => array('#markup' => $output));
+        }
+        else{
+            $output .= "file $path does not exist";
+            array('markup' => array('#markup' => $output));
+        }
+    }
+    $zip->close();
+
+    acquisition_central_download_file($zip_name);
+    exit;
+    //return array('markup' => array('#markup' => $output));
+}
+
+/*
+ * Download the current File in Zip format
+ */
+function acquisition_central_download_cur_page_zip(){
+    $parameters = drupal_get_query_parameters();
+    $parsedurl = parse_url(filter_xss(urldecode($parameters['url'])));
+    if(isset($parsedurl['path'])){
+        $path = getcwd()."/".$parsedurl['path'];
+    if(in_array($parsedurl['path'],array('/browsegsaminternal','/browsefarinternal'))){
+        //TODO replace with actual file function to get current zip file. For now it's statically linked
+        if($parsedurl['path'] == '/browsegsaminternal'){
+            $curhtmlinfo = acquisition_central_current_downlodable_file('gsam','html');
+            $zip_name = $curhtmlinfo['filename'];
+        }
+        elseif($parsedurl['path'] == '/browsefarinternal'){
+            $curhtmlinfo = acquisition_central_current_downlodable_file('far','html');
+            $zip_name = $curhtmlinfo['filename'];
+        }
+        //acquisition_central_download_file($zip_name);
+        drupal_goto("http://".$parsedurl['host']."/".$zip_name);
+        //$output = "File is $zip_name internal!";
+        //return array('markup' => array('#markup' => $output));
+    }
+    elseif(file_exists($path)){
+        //Check if user is trying to access any file other than far and gsam in current folder
+        if(strpos($path,"/sites/default/files/current/")){
+        $zip = new ZipArchive();
+        $zip_name = "/tmp/".basename($path).".zip"; // Zip name
+        $zip->open($zip_name,  ZipArchive::CREATE);
+
+                // $output .= "file $path exist";
+                $zip->addFromString(basename($path),  file_get_contents($path));
+                // array('markup' => array('#markup' => $output));
+
+        $zip->close();
+
+        acquisition_central_download_file($zip_name);
+        exit;
+        }
+        else{
+            $output = "Sorry you are not authorized to access this!";
+            return array('markup' => array('#markup' => $output));
+        }
+    }else{
+
+        $output = "Sorry File Doesn't exist";
+        return array('markup' => array('#markup' => $output));
+    }
+
+    }
+    else{
+        $output = "Sorry Invalid Path!";
+        return array('markup' => array('#markup' => $output));
+    }
+}
+
+/*
+ * Actual File Download Function
+ */
+
+function acquisition_central_download_file($file) {
+    if (!isset($file) || !file_exists($file)) {
+        return drupal_not_found();
+    }
+    $filepath = $file;
+    $realpath = realpath($filepath);
+    $filename = basename($filepath);
+    $extension = pathinfo($filepath, PATHINFO_EXTENSION);
+
+    // Check extension and restrict to files in /tmp directory only
+    if(in_array($extension, array('zip','tar','tar.gz')) && (strpos($filepath, "tmp"))) {
+        drupal_add_http_header('Content-disposition', 'attachment; filename=' . $filename);
+        readfile($filepath);
+    }
+    else {
+        return drupal_access_denied();
+    }
+}
+
+/*
+ * Get taxonomy terms from ids
+ * Input is drupal node element with metags information $node->field_meta_tags
+ */
+function acquisition_taxonomy_from_id($nid,$tags){
+    $tagsstring = "";
+    $alltags = "";
+    //dsm($tags);
+    foreach($tags as $key=>$val){
+          $tagsstring[] = $val;
+    }
+    $tagsstring1 =  join(',',$tagsstring);
+    $row = db_query("select b.name from field_data_field_meta_tags a , taxonomy_term_data b where a.field_meta_tags_tid=b.tid and b.tid in (:tags) and a.entity_id=':nid' order by tid", array(':tags' => $tagsstring1,':nid' => $nid));
+    foreach ($row as $record) {
+        $alltags .= $record->name."-";
+    }
+    return $alltags;
+}
+
+/*
+ * Get taxonomy terms from node id
+ */
+function acquisition_taxonomy_from_nid($nid){
+    //dsm($nid);
+$alltags = array();
+    $row = db_query("select b.name,b.tid from field_data_field_meta_tags a , taxonomy_term_data b where a.field_meta_tags_tid=b.tid and a.entity_id=:nid order by tid", array(':nid' => $nid));
+    foreach ($row as $record) {
+        $alltags[$record->tid] = $record->name;
+    }
+    return $alltags;
+}
+
+/*
+ * Download PDF or Zip from the node id
+ */
+function acquisition_central_download_node($type,$nid){
+    $output = "";
+
+    if($type == 'pdf')
+    {
+        $output .= "PDF file functionality coming soon...";
+    }
+    elseif($type == 'html')
+    {
+        $row = db_query("select field_file_location_value from  field_data_field_file_location a where  a.entity_id=:nid", array(':nid' => $nid));
+        foreach ($row as $record) {
+            $path = $record->field_file_location_value;
+        }
+        if(strpos($path,"#"))
+            $path = getcwd()."/".strstr($path, '#', true);
+        else
+            $path = getcwd()."/".$path;
+
+        if(file_exists($path)){
+            //Check if user is trying to access any file other than far and gsam in current folder
+            if(strpos($path,"/sites/default/files/current/")){
+                $zip = new ZipArchive();
+                $zip_name = "/tmp/".basename($path).".zip"; // Zip name
+                $zip->open($zip_name,  ZipArchive::CREATE);
+
+                $output .= "file $path exist";
+                $zip->addFromString(basename($path),  file_get_contents($path));
+                array('markup' => array('#markup' => $output));
+
+                $zip->close();
+
+                acquisition_central_download_file($zip_name);
+                exit;
+            }
+            else{
+                $output .= "Sorry you are not authorized to access this!";
+                return array('markup' => array('#markup' => $output));
+            }
+        }else{
+
+            $output .= "Sorry File Doesn't exist";
+            return array('markup' => array('#markup' => $output));
+        }    }
+
+
+            return array('markup' => array('#markup' => $output));
+
+}
+
+    /*
+     * Acquisition Social Icons
+     */
+function acquisition_central_social_icons(){
+$social_text = "<a href=\"#\" onclick=\"window.open('https://twitter.com/intent/tweet?text=Home of All Federal Acquisitions.&url=".urlencode('http://'.$_SERVER['HTTP_HOST'].$_SERVER['REQUEST_URI'])."', 'twitter_share', 'height=320, width=640, toolbar=no, menubar=no, scrollbars=no, resizable=no, location=no, directories=no, status=no');\">
+<img src=\"/sites/all/themes/acquisition/images/soc-icon-twitter.png\" alt=\"twitter\"></a>
+                <a href=\"/?q=rss-feed\"><img src=\"/sites/all/themes/acquisition/images/soc-icon-rss.png\" alt=\"rss\"></a>
+                <a href=\"#\" onclick=\"window.open('https://www.facebook.com/sharer/sharer.php?u==".urlencode('http://'.$_SERVER['HTTP_HOST'].$_SERVER['REQUEST_URI'])."', 'facebook_share', 'height=320, width=640, toolbar=no, menubar=no, scrollbars=no, resizable=no, location=no, directories=no, status=no');\"><img src=\"/sites/all/themes/acquisition/images/soc-icon-fb.png\" alt=\"rss\"></a>
+                <a href=\"mailto:acquisition_gov.systemadmin@gsa.gov\"><img src=\"/sites/all/themes/acquisition/images/soc-icon-mail.png\" alt=\"mail\"></a>
+            ";
+return $social_text;
+
+}
+
+/**
+ * Last date site modified
+ */
+function acquisition_central_last_date_modified() {
+  $results = db_query("SELECT n.changed FROM {node} n WHERE n.status = 1 AND n.type IN (:type) ORDER BY n.changed DESC LIMIT 1", array(':type' => array('far')));
+  // default time to now()
+  $date_modified = date('m/d/y', time());
+  if(!empty($results)) {
+    foreach($results as $result) {
+      $date_modified = date('m/d/y', $result->changed);
+    }
+  }
+  return $date_modified;
+}
+
+
+/*
+ * Show 5 latest entries for the front page slider
+ */
+
+function acquisition_central_front_sliders(){
+
+    $slider = '';
+    $row = db_query("select a.nid,a.title as title ,d.uri as uri ,c.field_read_more_value as field_read_more_value,e.field_carousel_order_value from node a , field_data_field_carousel_image b , field_data_field_read_more c , file_managed d ,field_data_field_carousel_order e where a.nid=b.entity_id and a.type='front_page_carousel' and b.field_carousel_image_fid=d.fid and a.nid=e.entity_id and a.nid=c.entity_id group by a.nid order by e.field_carousel_order_value asc limit 5");
+    foreach ($row as $record) {
+        $slider .= '<div>
+                <div class="slide-left">
+                    <p>'.$record->title.'</p>
+                    <a href="'.$record->field_read_more_value.'" class="read-more">READ MORE</a>
+                </div>
+                <img src="'.file_create_url($record->uri).'" alt="'.$record->title.'">
+            </div>';
+    }
+    return $slider;
+}
+
+/*
+ * Views hook for changing dtae format in archives
+ */
+function acquisition_central_form_views_exposed_form_alter(&$form, $form_state) {
+    $form['field_archive_effective_date_value']['value']['#date_format'] = 'm/d/Y';
+}
+
+/*
+ * Find the current html or pdf zip file based on type
+ */
+function acquisition_central_current_downlodable_file($type,$file_type){
+    if ($type === 'far' AND $file_type === 'pdf') {
+        $current_folder = "sites/default/files/current/far/pdf";
+    } else {
+        $current_folder = "sites/default/files/current/".$type."/zip/".$file_type;
+    }
+    $fileinfo = array();
+    if (scandir("$current_folder")) {
+        //Ignore all the files starting from . dot
+        $files = preg_grep('/^([^.])/', scandir($current_folder));
+        $files = array_values($files);
+        $fileinfo['filename'] =  $current_folder."/".$files[0];
+        $fileinfo['filesize'] =  human_filesize($current_folder."/".$files[0]);
+    }
+
+return $fileinfo;
+}
+
+
+/**
+ * Implements hook_views_api()
+ */
+function acquisition_central_views_api() {
+    return array(
+        'api' => 3,
+    );
+}
+
+/**
+ * Implements hook_views_query_alter()
+ */
+function acquisition_central_views_query_alter(&$view, &$query) {
+    if ($view->name === 'archives' AND ($view->current_display === 'page' OR $view->current_display === 'page_1')) {
+    $row_input = $view->exposed_raw_input['field_archive_effective_date_value']['value'];
+        if(isset($row_input)) {
+            $view->display_handler->default_display->options['pager']['options'] = array(
+                'items_per_page' => 1,
+                'offset' => 0,
+                'total_pages' => 1,
+                'quantity' => 1,
+                'items_per_page' => 1,
+            );
+        }
+    }
+
+    // Block logged-in users from viewing 'File Upload' views report, based on their roles.
+    if ($view->name === 'file_upload_report' AND $view->current_display === 'upload_report') {
+        global $user;
+        foreach($user->roles as $key => $role) {
+          if($key != 2) {
+            $user_role = $role;
+          }
+        }
+
+        if($user_role === 'FAR Admin') {
+          $view->query->where[1]['conditions'][2]['value'] = array(
+            'FAR' => 'FAR',
+            'operator' => '=',
+          );
+        } elseif($user_role == 'GSAM Admin') {
+          $view->query->where[1]['conditions'][2]['value'] = array(
+            'GSAM' => 'GSAM',
+            'operator' => '=',
+          );
+        } elseif($user_role === 'Site Admin' OR $user_role === 'administrator') {
+          $view->query->where[1]['conditions'][2]['value'] = array(
+            'FAR' => 'FAR',
+            'GSAM' => 'GSAM',
+            'operator' => 'IN',
+          );
+        }
+    }
+}
+
+/*
+ * Get the current version number and effective date for far or gsam
+ */
+function acquisition_central_get_curinfo($type){
+    $curinfo = array();
+    $row = db_query("select a.nid,a.title,b.field_upload_type_value,c.field_fac_number_value,DATE_FORMAT(d.field_archive_effective_date_value, '%m-%d-%Y') as field_archive_effective_date_value from node a , field_data_field_upload_type b , field_data_field_fac_number c , field_data_field_archive_effective_date d where a.type='current_uploads' and a.nid=b.entity_id and a.nid=c.entity_id  and a.nid=d.entity_id and b.field_upload_type_value=:type  order by a.created desc limit 1", array(':type' => $type));
+    foreach ($row as $record) {
+        $curinfo['cur_version'] = $record->field_fac_number_value;
+        $curinfo['cur_effective_date'] = $record->field_archive_effective_date_value;
+    }
+    return $curinfo;
+}
+/*
+ * Function get get search excerpt
+ */
+function acquisition_central_search_excerpt($text, $phrase, $radius = 100, $ending = "...") {
+
+
+    $phraseLen = strlen($phrase);
+    if ($radius < $phraseLen) {
+        $radius = $phraseLen;
+    }
+
+    $phrases = explode (' ',$phrase);
+
+    foreach ($phrases as $phrase) {
+        $pos = strpos(strtolower($text), strtolower($phrase));
+        if ($pos > -1) break;
+    }
+
+    $startPos = 0;
+    if ($pos > $radius) {
+        $startPos = $pos - $radius;
+    }
+
+    $textLen = strlen($text);
+
+    $endPos = $pos + $phraseLen + $radius;
+    if ($endPos >= $textLen) {
+        $endPos = $textLen;
+    }
+
+    $excerpt = substr($text, $startPos, $endPos - $startPos);
+    if ($startPos != 0) {
+        $excerpt = substr_replace($excerpt, $ending, 0, $phraseLen);
+    }
+
+    if ($endPos != $textLen) {
+        $excerpt = substr_replace($excerpt, $ending, -$phraseLen);
+    }
+
+    return $excerpt;
+}
+
+/*
+ * Find the current looseleaf file based on type
+ */
+function acquisition_central_current_looseleaf_file($type){
+    $current_folder = "sites/default/files/current/".$type."/loose_leaf/";
+    $fileinfo = array();
+    if (scandir("$current_folder")) {
+        //Ignore all the files starting from . dot
+        $files = preg_grep('/^([^.])/', scandir($current_folder));
+        $files = array_values($files);
+        $fileinfo['filename'] =  $current_folder."/".$files[0];
+        $fileinfo['filesize'] =  human_filesize($current_folder."/".$files[0]);
+    }
+
+    return $fileinfo;
+}

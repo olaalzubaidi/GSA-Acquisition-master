@@ -1,0 +1,11 @@
+name = Acquisition Logs
+description = Acquisition uploads activity logs veiws report
+core = 7.x
+package = Features
+version = 7.x-1.0
+project = acquisition_logs
+dependencies[] = views
+features[ctools][] = views:views_default:3.0
+features[features_api][] = api:2
+features[views_view][] = upload_activity_logs
+features_exclude[dependencies][ctools] = ctools

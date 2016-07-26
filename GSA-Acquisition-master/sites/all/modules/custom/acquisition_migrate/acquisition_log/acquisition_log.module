@@ -1,0 +1,29 @@
+<?php
+
+function watcher($content_type, $type, $message) {
+  global $user, $base_root;
+
+  // The user object may not exist in all conditions, so 0 is substituted if needed.
+  $user_uid = isset($user->uid) ? $user->uid : 0;
+
+  $nid = db_insert('acquisition_log')->fields(array(
+    'type' => strtoupper($type),
+    'content_type' => $content_type,
+    'message' => $message,
+    'uid' => $user_uid,
+    'request_uri' => $base_root . request_uri(),
+    'ip' => ip_address(),
+    'timestamp' => time(),
+  ))
+  ->execute();
+}
+
+/**
+ * Implements hook_views_api().
+ */
+function acquisition_log_views_api() {
+  return array(
+    'api' => 3,
+    'path' => drupal_get_path('module', 'acquisition_log') . '/includes/views',
+  );
+}

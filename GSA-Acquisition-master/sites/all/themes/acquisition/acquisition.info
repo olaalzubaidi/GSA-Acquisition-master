@@ -1,0 +1,38 @@
+
+name = Basic Theme for New Acquisition.gov
+description = A custom theme.
+screenshot = images/screenshot.png
+core = 7.x
+engine = phptemplate
+
+; Stylesheets. Anything within the "framework" folder will be placed before all others.
+;stylesheets[all][] = styles/framework/reset.css
+
+; Theme specific styles. Any sub-themes should override this.
+stylesheets[all][] = styles/fonts.css
+stylesheets[all][] = styles/styles.css
+stylesheets[all][] = styles/custom.css
+stylesheets[all][] = js/slick/slick.css
+stylesheets[all][] = styles/responsive.css
+stylesheets[all][] = styles/jquery.mmenu.all.css
+
+
+; Theme specific scripts
+scripts[] = js/slick/slick.min.js
+scripts[] = js/global.js
+scripts[] = js/jquery.mmenu.all.min.js
+
+regions[header]                     = Header
+regions[main_nav]		            = Main Navigation
+regions[search_box]		            = Search Box
+regions[front_carousel]             = Front Carousel
+regions[content]                    = Content
+regions[right_sidebar]              = Right Sidebar
+regions[footer]                     = Footer
+
+; Information added by drupal.org packaging script on 2011-01-11
+version = "7.x-1.0"
+core = "7.x"
+project = "acquisition"
+datestamp = "1294708616"
+

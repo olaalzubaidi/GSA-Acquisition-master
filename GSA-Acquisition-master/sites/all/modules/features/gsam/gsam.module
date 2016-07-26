@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the GSAM feature.
+ */
+
+include_once 'gsam.features.inc';

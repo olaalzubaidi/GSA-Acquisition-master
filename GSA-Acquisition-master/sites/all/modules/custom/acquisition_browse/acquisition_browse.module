@@ -1,0 +1,274 @@
+<?php
+
+/*
+ * Implements hook_menu()
+ */
+function acquisition_browse_menu() {
+    $items = array();
+    $items['browsefar'] = array(
+        'title' => "Browse Far",
+        'page callback' => 'acquisition_browse_far_page',
+        'access callback' => TRUE,
+        'type' => MENU_NORMAL_ITEM
+    );
+    $items['browsefarinternal'] = array(
+        'title' => "Browse Far",
+        'page callback' => 'acquisition_browse_far_page_internal',
+        'access callback' => TRUE,
+        'type' => MENU_NORMAL_ITEM
+    );
+    $items['browsegsam'] = array(
+        'title' => "Browse GSAM",
+        'page callback' => 'acquisition_browse_gsam_page',
+        'access callback' => TRUE,
+        'type' => MENU_NORMAL_ITEM
+    );
+    $items['browsegsaminternal'] = array(
+        'title' => "Browse GSAM",
+        'page callback' => 'acquisition_browse_gsam_page_internal',
+        'access callback' => TRUE,
+        'type' => MENU_NORMAL_ITEM
+    );
+    $items['browse/byfname'] = array(
+        'title' => "Browse By File Name",
+        'page callback' => 'acquisition_browse_by_filename',
+        'access callback' => TRUE,
+        'type' => MENU_NORMAL_ITEM
+    );
+    return $items;
+}
+
+function acquisition_browse_far_page($far_page = NULL) {
+    $processed_vars = acquisition_browse_process_far();
+    $processed_vars['far_page'] = $far_page;
+    return theme('acquisition_browse_far_page', array('processed_vars' => $processed_vars));
+}
+
+function acquisition_browse_far_page_internal() {
+    $processed_vars = acquisition_browse_process_far();
+    $processed_vars['table_contents'] = acquisition_browse_far_internal($processed_vars['far_part_subpart']);
+    $processed_vars['table_contents'] .= acquisition_browse_far_internal($processed_vars['far_appendix']);
+    print theme('acquisition_browse_far_internal_page', array('processed_vars' => $processed_vars));
+    exit;
+}
+
+function acquisition_browse_gsam_page_internal() {
+    $processed_vars = acquisition_browse_process_gsam();
+    $processed_vars['table_contents'] = acquisition_browse_gsam_internal($processed_vars['gsam_part_subpart']);
+    print theme('acquisition_browse_gsam_internal_page', array('processed_vars' => $processed_vars));
+    exit;
+}
+
+function acquisition_browse_process_far() {
+    $processed_vars = array();
+    $far_part_subpart = array();
+    $far_appendix = array();
+    $far_left_navigation = "";
+
+    module_load_include('inc', 'acquisition_migrate', 'download_acquisition_migrate');
+    $part_numbers = array();
+    $part_numbers = get_part_subpart_info('far');
+    $p_array = array();
+    $sp_array = array();
+    $m_array = array();
+    foreach($part_numbers as $part_number) {
+        $p_array[] = $part_number['title'];
+        $far_left_navigation .= "<a href='/" . $part_number['url'] . "' class='parts' title='" . $part_number['title'] . "' onclick=\"browserurlchange('/".drupal_get_path_alias('node/'.$part_number['nid'])."');\" onkeydown=\"browserurlchange('/".drupal_get_path_alias('node/'.$part_number['nid'])."');\"target='browse'>" . $part_number['part'] . "</a>";
+        $partno = "<a class='part' id='far_part' href='" . $part_number['url'] . "'>" . $part_number['title'] . "</a>";
+
+        if($part_number['doc_type'] === 'Part' && $part_number['subpart'] === NULL) {
+            $far_part_subpart[$partno] = $partno;
+        }
+
+        if($part_number['subpart'] !== NULL) {
+            foreach($part_number['subpart'] as $key => $subpart_result) {
+                $sp_array[] = $subpart_result['title'];
+                $subpart = "<a class='subpart' id='far_subpart' href='" . $subpart_result['url'] . "'>" . $subpart_result['title'] . "</a>";
+                $far_part_subpart[$partno][$key] = $subpart;
+            }
+        }
+    }
+    $p_array = array_filter($p_array);
+    $sp_array = array_filter($sp_array);
+    $m_array = array_merge($p_array, $sp_array);
+    foreach(get_listed_in_index('far') as $key => $value) {
+        if(!in_array($value->title, $m_array)) {
+            $far_append = "<a class='part' id='far_part' href='" . $value->field_file_location_value . "'>" . $value->title . "</a>";
+            $far_appendix[$far_append] = $far_append;
+        }
+    }
+    $processed_vars['far_left_navigation'] = $far_left_navigation;
+    $processed_vars['far_part_subpart'] = $far_part_subpart;
+    $processed_vars['far_appendix'] = $far_appendix;
+
+   return $processed_vars;
+}
+
+function acquisition_browse_theme($existing, $type, $theme, $path) {
+    return array(
+        'acquisition_browse_far_page' => array(
+            'template' => 'acquisition-browse-far-page',
+            'variables' => array('nid' => NULL),
+            'path' => drupal_get_path('module', 'acquisition_browse') . '/templates',
+        ),
+        'acquisition_browse_far_internal_page' => array(
+            'template' => 'acquisition-browse-far-internal-page',
+            'variables' => array('nid' => NULL),
+            'path' => drupal_get_path('module', 'acquisition_browse') . '/templates',
+        ),
+        'acquisition_browse_gsam_page' => array(
+            'template' => 'acquisition-browse-gsam-page',
+            'variables' => array('nid' => NULL),
+            'path' => drupal_get_path('module', 'acquisition_browse') . '/templates',
+        ),
+        'acquisition_browse_gsam_internal_page' => array(
+            'template' => 'acquisition-browse-gsam-internal-page',
+            'variables' => array('nid' => NULL),
+            'path' => drupal_get_path('module', 'acquisition_browse') . '/templates',
+        )
+    );
+}
+
+function acquisition_browse_far_internal($far_part_subpart) {
+    $j = 1;
+    $themepath = drupal_get_path('theme', $GLOBALS['theme']);
+    $table_contents = '';
+    foreach($far_part_subpart as $pkey => $pval) {
+        $urlparse = new SimpleXMLElement($pkey);
+        $table_contents .= "
+            <tr class='browse-part'>
+                <td class='browse-link'>" . $pkey . "</td>
+                <td colspan='2'><a href='/?q=downloadzip/far/part/&url=".urlencode($urlparse['href'])."'><img src='" . $themepath . "/images/html.png'></a></td>
+            </tr>";
+        $i = 1;
+        if(is_array($pval)) {
+            foreach($pval as $skey => $sval) {
+                $urlparsesub = new SimpleXMLElement($sval);
+                if (0 == $i % 2)
+                    $oeclass = 'even';
+                else
+                    $oeclass = 'odd';
+                // get sub_part_number which we will use for the download link
+                $spn = substr($sval, strpos($sval, 'Subpart ') + strlen('Subpart '), strpos($sval, '.html#'));
+                $spn = substr($spn, 0, strpos($spn, '.html#'));
+                $spn = substr($spn, 1 + strpos($spn, '_'));
+                // string length < '10Reserved' which is 10 chars
+                if(strlen($spn) < 11)
+                    $sub_part_number = $spn;
+                $table_contents .= "
+                    <tr class='browse-subpart " . $oeclass . "'>
+                        <td class='browse-link'>" . $sval . "</td>
+                        <td><a href='/?q=downloadzip/far/subpart/&url=".urlencode($urlparsesub['href'])."'><img src='" . $themepath . "/images/html.png'></a></td>
+                        <td>&nbsp;</td>
+                    </tr>";
+                $i++;
+            }
+        }
+        $j++;
+    }
+    return $table_contents;
+}
+
+function acquisition_browse_gsam_page($gsam_page = NULL) {
+    $processed_vars = acquisition_browse_process_gsam();
+    $processed_vars['gsam_page'] = $gsam_page;
+    return theme('acquisition_browse_gsam_page', array('processed_vars' => $processed_vars));
+}
+
+function acquisition_browse_process_gsam() {
+    $processed_vars = array();
+    $gsam_part_subpart = array();
+    $gsam_left_navigation = "";
+    module_load_include('inc', 'acquisition_migrate', 'download_acquisition_migrate');
+    $part_numbers = array();
+    $part_numbers = get_part_subpart_info('gsam');
+    foreach($part_numbers as $key => $part_number_value) {
+        $gsam_left_navigation .= "<a href='/" . $part_number_value['url'] . "' class='parts' title='" . $part_number_value['title'] ."' onclick=\"browserurlchange('/".drupal_get_path_alias('node/'.$part_number_value['nid'])."');\" onkeydown=\"browserurlchange('/".drupal_get_path_alias('node/'.$part_number['nid'])."');\" target='browse'>" . $part_number_value['part'] . "</a>";
+    }
+    foreach($part_numbers as $key => $part_number_value) {
+        $partno = "<a href='" . $part_number_value['url'] . "'>" . $part_number_value['title'] . "</a>";
+        if($part_number_value['subpart'] == NULL) {
+            $gsam_part_subpart[$partno] = $partno;
+        }
+        if($part_number_value['subpart'] !== NULL) {
+            foreach($part_number_value['subpart'] as $key => $subpart_number_value) {
+                $subpart = "<a href='" . $subpart_number_value['url'] . "'>" . $subpart_number_value['title'] . "</a>";
+                $gsam_part_subpart[$partno][$key] = $subpart;
+            }
+        }
+    }
+    $processed_vars['gsam_left_navigation'] = $gsam_left_navigation;
+    $processed_vars['gsam_part_subpart'] = $gsam_part_subpart;
+    return $processed_vars;
+}
+
+function acquisition_browse_gsam_internal($gsam_part_subpart) {
+    $j = 1;
+    $themepath = drupal_get_path('theme',$GLOBALS['theme']);
+    $table_contents = "<table id='browse-table'><tbody>";
+    foreach($gsam_part_subpart as $pkey => $pval){
+        $urlparse = new SimpleXMLElement($pkey);
+        $matches = array();
+        $pattern = '/([0-9]{3})—/';
+        preg_match($pattern, $pkey, $matches);
+        $partno = $matches[1];
+        $table_contents .= "<tr class='browse-part'><td class='browse-link'>$pkey</td><td colspan='2'><a href='/?q=downloadzip/gsam/part/&url=".urlencode($urlparse['href'])."'><img src='".$themepath."/images/html.png'></a></td></tr>";
+        $i = 1;
+        if(is_array($pval)) {
+            foreach($pval as $skey => $sval) {
+                $urlparsesub = new SimpleXMLElement($sval);
+                if (0 == $i % 2)
+                    $oeclass = 'even';
+                else
+                    $oeclass = 'odd';
+                $table_contents .= "<tr class='browse-subpart $oeclass'><td class='browse-link'>$sval</td><td><a href='/?q=downloadzip/gsam/subpart/&url=".urlencode($urlparsesub['href'])."'><img src='".$themepath."/images/html.png'></a></td><td>&nbsp;</td></tr>";
+                $i++;
+            }
+        }
+        $j++;
+    }
+    $table_contents .= "</tbody></table>";
+    return $table_contents;
+}
+
+/*
+ * Function to Brosw an URL by file name
+ */
+function acquisition_browse_by_filename() {
+    $parsedurl = parse_url(url_decode($_GET['url']));
+    $path = getcwd()."/".$parsedurl['path'];
+    if(file_exists($path)) {
+        //Check if user is trying to access any file other than far and gsam in current folder
+        if(strpos($path,"/sites/default/files/current/")) {
+            $row = db_query('SELECT entity_id FROM {field_data_field_file_location} WHERE field_file_location_value like :file_location', array(':file_location' => $parsedurl['path'].'%'))->fetchField();
+            if($row['entity_id'] != '') {
+                $output = $parsedurl['path'];
+                return array('markup' => array('#markup' => $output));
+                //drupal_goto("node/".$row['entity_id']);
+            }
+                else
+                    return array('markup' => array('#markup' => "File Not Found"));
+        }
+    }
+    else {
+        return array('markup' => array('#markup' => "File is not accessible!"));
+    }
+}
+
+/*
+ * Get Node info from Filename
+ */
+function acquisition_browse_getInfo_from_filename($filename){
+   // $sql = 'select entity_id,field_file_location_value from field_data_field_file_location where field_file_location_value like 'sites/default/files/current/far/html/Subpart 2_2.html%';
+}
+
+/*
+ * Human readable file size
+ */
+function human_filesize($file) {
+    $bytes = filesize($file);
+    $decimals = 2;
+    $sz = 'BKMGTP';
+    $factor = floor((strlen($bytes) - 1) / 3);
+    return sprintf("%.{$decimals}f", $bytes / pow(1024, $factor)) . @$sz[$factor];
+}
